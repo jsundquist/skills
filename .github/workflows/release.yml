@@ -1,42 +1,94 @@
 name: release
 
-# Run by hand: Actions > release > Run workflow, on the default branch, after the
-# "chore(release): version X.Y.Z" PR has merged (see "Releasing" in the README).
-# Creates the tag vX.Y.Z and the GitHub release, with the notes taken from CHANGELOG.md.
+# Run by hand: Actions > release > Run workflow, on the default branch. It looks at the repository and
+# does the next step, so run it once to prepare a release and again after the PR has merged.
+#
+#  1. Changesets are pending: bump the version (the highest level among them wins: major, then minor,
+#     then patch), update package.json, plugin.json and CHANGELOG.md, push release/vX.Y.Z and open a PR.
+#  2. Nothing is pending and vX.Y.Z has no tag yet: create the tag and the GitHub release, with that
+#     version's section of CHANGELOG.md as the notes.
 on:
   workflow_dispatch:
 
 permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
     if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     permissions:
-      contents: write # create the tag and the release
+      contents: write # push the release branch, create the tag and the release
+      pull-requests: write # open the version PR
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: package.json and plugin.json carry the same version
-        run: node scripts/sync-plugin-version.mjs --check
-      - name: Warn about unreleased changesets
+
+      - name: Decide what to do
+        id: plan
         run: |
           pending="$(find .changeset -name '*.md' ! -name README.md)"
+          version="$(node -p "require('./package.json').version")"
           if [ -n "$pending" ]; then
-            echo "::warning::Unreleased changesets are still in .changeset/ and will not be in this release: $pending"
+            phase=version
+          elif gh api "repos/${REPO}/git/ref/tags/v${version}" > /dev/null 2>&1; then
+            echo "::error::Nothing to release: no pending changesets, and v${version} already exists"
+            exit 1
+          else
+            phase=release
           fi
-      - name: Create the tag and the release
+          echo "phase=${phase}" >> "$GITHUB_OUTPUT"
+          echo "Next step: ${phase} (current version ${version})"
+
+      # --- 1. prepare the version PR
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        if: steps.plan.outputs.phase == 'version'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.plan.outputs.phase == 'version'
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install (frozen lockfile)
+        if: steps.plan.outputs.phase == 'version'
+        run: pnpm install --frozen-lockfile
+      - name: Bump the version from the changesets
+        if: steps.plan.outputs.phase == 'version'
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ github.token }} # the changelog formatter looks up commit and PR links
+        run: pnpm run version
+      - name: Push the release branch and open the PR
+        if: steps.plan.outputs.phase == 'version'
         run: |
           version="$(node -p "require('./package.json').version")"
-          tag="v${version}"
-          if gh api "repos/${REPO}/git/ref/tags/${tag}" > /dev/null 2>&1; then
-            echo "::error::${tag} already exists; run pnpm run version to bump the version first"
-            exit 1
+          branch="release/v${version}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -A
+          git commit -m "chore(release): version ${version}"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/${branch}"
+          if ! gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "$branch" \
+            --title "chore(release): version ${version}" \
+            --body "Bumps the version to ${version} and writes the changelog from the pending changesets. Merge it, then run the release workflow again to create the tag and the GitHub release."; then
+            echo "::notice::Could not open the PR (is it already open, or are Actions not allowed to create PRs?). Open it: https://github.com/${REPO}/compare/${DEFAULT_BRANCH}...${branch}?expand=1"
           fi
+
+      # --- 2. tag and release
+      - name: Create the tag and the release
+        if: steps.plan.outputs.phase == 'release'
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          node scripts/sync-plugin-version.mjs --check
+          version="$(node -p "require('./package.json').version")"
+          tag="v${version}"
           node scripts/release-notes.mjs "$version" > notes.md
           gh release create "$tag" --repo "$REPO" --target "$SHA" --title "$tag" --notes-file notes.md
