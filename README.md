@@ -86,7 +86,7 @@ CI (`.github/workflows/ci.yml`) runs the tests on Python 3.11 and the latest 3.x
 
 Versions are tracked with [Changesets](https://github.com/changesets/changesets). The version lives in `package.json` (private, never published) and is copied to `.claude-plugin/plugin.json`. Tags are `vX.Y.Z`; `plugin.json` and the changelog use `X.Y.Z`.
 
-1. For every change a user of the skills should know about, run `pnpm changeset`, choose `patch`, `minor` or `major`, and describe the change for a reader. Commit the generated file in `.changeset/` with the change.
+1. The whole repo is one plugin with one version, so every skill is released together. For every change a user of the skills should know about, add one changeset **per skill** (`pnpm changeset`), start its description with the skill's name in backticks, and choose `patch`, `minor` or `major` for that change. Commit the file in `.changeset/` with the change. Changes nobody would notice (tests, CI, refactors, docs) get no changeset. The release takes the highest level among all pending changesets.
 2. In the Actions tab, run the **release** workflow on `main`. With changesets pending it reads all of them, takes the highest level (major beats minor beats patch), updates `package.json`, `plugin.json` and `CHANGELOG.md`, pushes a `release/vX.Y.Z` branch and opens a PR. Merge that PR.
 3. Run the **release** workflow again. With nothing pending and no tag for the current version, it creates the tag `vX.Y.Z` and the GitHub release, with that version's section of `CHANGELOG.md` as the notes.
 
