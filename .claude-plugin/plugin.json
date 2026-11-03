@@ -1,0 +1,7 @@
+{
+  "name": "jsundquist",
+  "version": "0.0.0",
+  "description": "Audit and harden the software supply-chain settings of a GitHub repository with the gh CLI.",
+  "author": { "name": "Jonathan Sundquist" },
+  "license": "MIT"
+}

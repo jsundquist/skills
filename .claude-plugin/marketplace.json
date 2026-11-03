@@ -1,0 +1,14 @@
+{
+  "name": "jsundquist",
+  "owner": { "name": "Jonathan Sundquist" },
+  "description": "Skills for auditing and hardening GitHub repositories.",
+  "plugins": [
+    {
+      "name": "jsundquist",
+      "source": "./",
+      "description": "Audit and harden the software supply-chain settings of a GitHub repository with the gh CLI.",
+      "category": "security",
+      "keywords": ["supply-chain", "security", "github", "audit"]
+    }
+  ]
+}
