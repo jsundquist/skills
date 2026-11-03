@@ -1,0 +1,20 @@
+# Local checks before each commit. CI runs the same tools and is the real gate; this only catches problems sooner.
+# Once per clone:  lefthook install
+# Install the tools: brew install gitleaks actionlint zizmor   (see each project for other platforms)
+# A tool that is not installed is skipped without a message, so it never blocks a commit.
+pre-commit:
+  commands:
+    gitleaks:
+      skip:
+        - run: "! command -v gitleaks"
+      run: gitleaks git --pre-commit --staged --redact
+    actionlint:
+      glob: ".github/workflows/*.{yml,yaml}"
+      skip:
+        - run: "! command -v actionlint"
+      run: actionlint {staged_files}
+    zizmor:
+      glob: ".github/workflows/*.{yml,yaml}"
+      skip:
+        - run: "! command -v zizmor"
+      run: zizmor {staged_files}
