@@ -1,0 +1,27 @@
+name: dependabot-coverage
+
+on:
+  pull_request:
+  push:
+    branches: [{{branch}}]
+  schedule:
+    - cron: "29 5 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: dependabot-coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependabot-coverage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: {{pin:actions/checkout}}
+        with:
+          persist-credentials: false
+      - name: Compare manifests with .github/dependabot.yml
+        run: bash .github/scripts/check-dependabot-coverage.sh

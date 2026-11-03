@@ -1,0 +1,81 @@
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [{{branch}}]
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # only needed for private repos
+    steps:
+      - uses: {{pin:actions/checkout}}
+        with:
+          persist-credentials: false
+      - uses: {{pin:zizmorcore/zizmor-action}}
+        with:
+          advanced-security: false
+
+  actionlint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: {{pin:actions/checkout}}
+        with:
+          persist-credentials: false
+      - id: actionlint
+        uses: {{pin:raven-actions/actionlint}}
+      - name: Summarize actionlint
+        if: always()
+        env:
+          VERSION: ${{ steps.actionlint.outputs.version-tag }}
+          FILES: ${{ steps.actionlint.outputs.total-files }}
+          ERRORS: ${{ steps.actionlint.outputs.total-errors }}
+        run: |
+          {
+            echo "### actionlint"
+            echo "Version ${VERSION:-unknown}: ${FILES:-0} files checked, ${ERRORS:-0} problems."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: {{pin:actions/checkout}}
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: {{pin:gitleaks/gitleaks-action}}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Repos owned by an organization need a free key from gitleaks.io in this secret.
+          # Repos on a personal account do not.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  dependency-review:
+    # The action only works on pull requests; on other events this job is skipped,
+    # which a required check treats as passing.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: {{pin:actions/checkout}}
+        with:
+          persist-credentials: false
+      - uses: {{pin:actions/dependency-review-action}}

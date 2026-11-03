@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+# Add an entry (with the same cooldown) for every other ecosystem in this repo.
+# The dependabot-coverage workflow fails when a manifest has no matching entry.
