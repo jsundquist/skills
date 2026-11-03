@@ -1,6 +1,10 @@
-# supply-chain-audit
+# skills
 
-Two [Claude Code skills](https://code.claude.com/docs/en/skills) and their standalone shell scripts for auditing and hardening the supply-chain settings of a GitHub repository. Everything goes through the `gh` CLI.
+[Claude Code skills](https://code.claude.com/docs/en/skills), packaged as the `jsundquist` plugin. Each skill lives in `skills/<name>` and is self-contained.
+
+## Repo supply-chain security
+
+Two skills, with Python scripts that go through the `gh` CLI, for auditing and hardening the supply-chain settings of a GitHub repository.
 
 | Skill | Script | What it does |
 |---|---|---|
@@ -47,8 +51,8 @@ This repo is a Claude Code plugin named `jsundquist`, so the skills are namespac
 Try it from a clone (validate first with `claude plugin validate .`):
 
 ```bash
-git clone https://github.com/OWNER/supply-chain-audit ~/src/supply-chain-audit
-claude --plugin-dir ~/src/supply-chain-audit
+git clone https://github.com/jsundquist/skills ~/src/skills
+claude --plugin-dir ~/src/skills
 ```
 
 To keep it installed, add this repo as a marketplace and install from it:
@@ -61,7 +65,7 @@ To keep it installed, add this repo as a marketplace and install from it:
 Or link the skills instead (each is self-contained), which gives the un-namespaced names `/repo-supply-chain-check` and `/repo-supply-chain-bootstrap`:
 
 ```bash
-for s in ~/src/supply-chain-audit/skills/*; do ln -s "$s" ~/.claude/skills/; done
+for s in ~/src/skills/skills/*; do ln -s "$s" ~/.claude/skills/; done
 ```
 
 Use `.claude/skills/` inside a repo to scope them to one project.

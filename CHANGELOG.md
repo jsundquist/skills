@@ -1,4 +1,4 @@
-# supply-chain-audit
+# jsundquist-skills
 
 ## 0.1.0
 
