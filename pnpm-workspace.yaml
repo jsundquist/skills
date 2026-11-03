@@ -1,0 +1,5 @@
+# Nothing in this repo's tooling needs to run an install script.
+allowBuilds: {}
+
+# Refuse package versions published less than 7 days ago (minutes).
+minimumReleaseAge: 10080
