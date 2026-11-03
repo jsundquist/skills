@@ -83,8 +83,10 @@ CI (`.github/workflows/ci.yml`) runs the tests on Python 3.11 and the latest 3.x
 Versions are tracked with [Changesets](https://github.com/changesets/changesets). The version lives in `package.json` (private, never published) and is copied to `.claude-plugin/plugin.json`. Tags are `vX.Y.Z`; `plugin.json` and the changelog use `X.Y.Z`.
 
 1. For every change a user of the skills should know about, run `pnpm changeset`, choose `patch`, `minor` or `major`, and describe the change for a reader. Commit the generated file in `.changeset/` with the change.
-2. To release, on a branch run `GITHUB_TOKEN="$(gh auth token)" pnpm run version` (the changelog formatter needs a token to look up links). It consumes the changesets, bumps both manifests and writes `CHANGELOG.md`. Open a PR titled `chore(release): version X.Y.Z` and merge it.
-3. In the Actions tab, run the **release** workflow on `main`. It creates the tag `vX.Y.Z` and the GitHub release, with that version's section of `CHANGELOG.md` as the notes. It stops if the two manifests disagree, if the tag already exists, or if the changelog has no section for the version, and it warns about changesets that are still pending.
+2. In the Actions tab, run the **release** workflow on `main`. With changesets pending it reads all of them, takes the highest level (major beats minor beats patch), updates `package.json`, `plugin.json` and `CHANGELOG.md`, pushes a `release/vX.Y.Z` branch and opens a PR. Merge that PR.
+3. Run the **release** workflow again. With nothing pending and no tag for the current version, it creates the tag `vX.Y.Z` and the GitHub release, with that version's section of `CHANGELOG.md` as the notes.
+
+It needs two runs because `main` is protected: the version commit has to go through a PR. The workflow stops with an error if there is nothing to release. If it cannot open the PR itself (Actions may not create PRs on this repo; bootstrap turns that off), it prints the link to open it by hand. To bump the version locally instead: `GITHUB_TOKEN="$(gh auth token)" pnpm run version` on a branch.
 
 ## License
 
