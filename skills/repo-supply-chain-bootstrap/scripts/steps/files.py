@@ -116,7 +116,7 @@ class Files:
             run.do("open a pull request for the new files", lambda: gh_command([
                 "pr", "create", "-R", run.repo, "--head", WORK_BRANCH, "--base", run.branch,
                 "--title", "chore(security): add supply-chain starter files",
-                "--body", "Files added by supply-chain-audit bootstrap. Merge once the checks pass."]))
+                "--body", "Files added by repo-supply-chain-bootstrap. Merge once the checks pass."]))
         else:
             print("(no new files to propose)")
 
