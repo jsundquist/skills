@@ -1,6 +1,6 @@
 {
   "name": "supply-chain-audit",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Audit and harden the software supply-chain settings of a GitHub repository with the gh CLI.",
   "repository": {
