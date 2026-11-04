@@ -1,6 +1,10 @@
-# supply-chain-audit
+# skills
 
-Two [Claude Code skills](https://code.claude.com/docs/en/skills) and their standalone shell scripts for auditing and hardening the supply-chain settings of a GitHub repository. Everything goes through the `gh` CLI.
+[Claude Code skills](https://code.claude.com/docs/en/skills), packaged as the `jsundquist` plugin. Each skill lives in `skills/<name>` and is self-contained.
+
+## Repo supply-chain security
+
+Two skills, with Python scripts that go through the `gh` CLI, for auditing and hardening the supply-chain settings of a GitHub repository.
 
 | Skill | Script | What it does |
 |---|---|---|
@@ -47,8 +51,8 @@ This repo is a Claude Code plugin named `jsundquist`, so the skills are namespac
 Try it from a clone (validate first with `claude plugin validate .`):
 
 ```bash
-git clone https://github.com/OWNER/supply-chain-audit ~/src/supply-chain-audit
-claude --plugin-dir ~/src/supply-chain-audit
+git clone https://github.com/jsundquist/skills ~/src/skills
+claude --plugin-dir ~/src/skills
 ```
 
 To keep it installed, add this repo as a marketplace and install from it:
@@ -61,7 +65,7 @@ To keep it installed, add this repo as a marketplace and install from it:
 Or link the skills instead (each is self-contained), which gives the un-namespaced names `/repo-supply-chain-check` and `/repo-supply-chain-bootstrap`:
 
 ```bash
-for s in ~/src/supply-chain-audit/skills/*; do ln -s "$s" ~/.claude/skills/; done
+for s in ~/src/skills/skills/*; do ln -s "$s" ~/.claude/skills/; done
 ```
 
 Use `.claude/skills/` inside a repo to scope them to one project.
@@ -82,7 +86,7 @@ CI (`.github/workflows/ci.yml`) runs the tests on Python 3.11 and the latest 3.x
 
 Versions are tracked with [Changesets](https://github.com/changesets/changesets). The version lives in `package.json` (private, never published) and is copied to `.claude-plugin/plugin.json`. Tags are `vX.Y.Z`; `plugin.json` and the changelog use `X.Y.Z`.
 
-1. For every change a user of the skills should know about, run `pnpm changeset`, choose `patch`, `minor` or `major`, and describe the change for a reader. Commit the generated file in `.changeset/` with the change.
+1. The whole repo is one plugin with one version, so every skill is released together. For every change a user of the skills should know about, add one changeset **per skill** (`pnpm changeset`), start its description with the skill's name in backticks, and choose `patch`, `minor` or `major` for that change. Commit the file in `.changeset/` with the change. Changes nobody would notice (tests, CI, refactors, docs) get no changeset. The release takes the highest level among all pending changesets.
 2. In the Actions tab, run the **release** workflow on `main`. With changesets pending it reads all of them, takes the highest level (major beats minor beats patch), updates `package.json`, `plugin.json` and `CHANGELOG.md`, pushes a `release/vX.Y.Z` branch and opens a PR. Merge that PR.
 3. Run the **release** workflow again. With nothing pending and no tag for the current version, it creates the tag `vX.Y.Z` and the GitHub release, with that version's section of `CHANGELOG.md` as the notes.
 
