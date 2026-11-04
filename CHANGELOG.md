@@ -1,5 +1,11 @@
 # jsundquist-skills
 
+## 0.1.1
+
+### Patch Changes
+
+- [#2](https://github.com/jsundquist/skills/pull/2) [`3db6cdf`](https://github.com/jsundquist/skills/commit/3db6cdf9e0cb75686e56d6f6bf0cb144d2527bf8) Thanks [@jsundquist](https://github.com/jsundquist)! - `repo-supply-chain-bootstrap` names itself in the body of the pull request it opens for new files, instead of a project name that no longer exists.
+
 ## 0.1.0
 
 ### Minor Changes
