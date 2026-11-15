@@ -5,7 +5,7 @@ on:
   push:
     branches: [{{branch}}]
   schedule:
-    - cron: "17 5 * * 1"
+    - cron: "17 5 * * 1" # Mondays at 05:17 UTC
   workflow_dispatch:
 
 permissions: {}
