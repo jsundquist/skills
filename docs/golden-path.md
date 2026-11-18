@@ -542,12 +542,12 @@ A missing tool is skipped silently so it never blocks a commit. Add the 2.4 lint
 
 ```bash
 # In a clone: stage a fake token, confirm the hook rejects it, then remove it. Never commit or push it.
-echo 'token = "ghp_R8kZ3mQ9xV2nL5wT7yB4cH6jD1fG0aS8eUpK"' > leak-test.txt
+printf 'token = "ghp_%s"\n' R8kZ3mQ9xV2nL5wT7yB4cH6jD1fG0aS8eUpK > leak-test.txt
 git add leak-test.txt && lefthook run pre-commit      # should fail
 git restore --staged leak-test.txt && rm leak-test.txt
 ```
 
-Use a realistic-looking fake. gitleaks ignores obvious placeholders: the well-known AWS documentation key `AKIAIOSFODNN7EXAMPLE` is on its allowlist, so the hook passes and proves nothing.
+The `printf` splits the `ghp_` prefix from the body so this doc doesn't trip the repo's own gitleaks scan; the file it writes still matches. Use a realistic-looking fake. gitleaks ignores obvious placeholders: the well-known AWS documentation key `AKIAIOSFODNN7EXAMPLE` is on its allowlist, so the hook passes and proves nothing.
 
 ### 3.4 Lockfile committed and enforced
 
