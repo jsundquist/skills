@@ -2,7 +2,7 @@
 
 An ordered way to set up and harden a GitHub repository. Each layer assumes the ones before it. Work through it top to bottom; every step can be done by hand with the commands and files shown.
 
-Status: **draft**. All layers are written. Steps marked "Not verified yet" have not been run against a real repository.
+Status: **draft**. All layers are written. On 2026-11-18 every layer was run against two throwaway public repositories on a personal account, one to find problems and a second, fresh one after the fixes. Steps marked "Not verified yet" are the ones that run did not reach.
 
 ## Scope and conventions
 
@@ -191,7 +191,7 @@ The ruleset in 1.1 already limits the merge button to squash. This step turns th
 **Apply.**
 
 ```bash
-gh api -X PATCH repos/(repo) \
+gh api -X PATCH repos/(repo) --silent \
   -F allow_squash_merge=true -F allow_merge_commit=false -F allow_rebase_merge=false \
   -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=PR_BODY
 ```
@@ -211,7 +211,7 @@ gh api repos/(repo) --jq '{allow_squash_merge, allow_merge_commit, allow_rebase_
 **Apply / Verify.**
 
 ```bash
-gh api -X PATCH repos/(repo) -F delete_branch_on_merge=true
+gh api -X PATCH repos/(repo) --silent -F delete_branch_on_merge=true
 gh api repos/(repo) --jq .delete_branch_on_merge
 ```
 
@@ -219,7 +219,25 @@ gh api repos/(repo) --jq .delete_branch_on_merge
 
 **Why.** Shows that commits came from you. Merges done in the GitHub web UI are signed by GitHub automatically, so the cost is low.
 
-**Apply.** Add `{ "type": "required_signatures" }` to the ruleset's `rules`, using the update recipe under 2.5.
+**Before you enable it.** The rule requires every commit on a pull request branch to have a verified signature, not only the merge commit. GitHub signs the squash commit it makes, but your own commits on the branch must be signed too, and commits made with the contents API are not. Without a signing key GitHub knows about, every PR is blocked ("not mergeable") with all checks green. Set up signing first:
+
+1. Make a signing key and tell git to use it, for example an SSH key: `git config --global gpg.format ssh`, `git config --global user.signingkey ~/.ssh/KEY.pub`, `git config --global commit.gpgsign true`.
+2. Add the same public key to your account as a **signing key**: Settings → SSH and GPG keys → New SSH key → Key type "Signing Key". It is separate from any authentication key you already have.
+3. Commit something on a branch, push it, and check `gh api repos/(repo)/commits/BRANCH --jq .commit.verification` shows `"verified": true`.
+
+**Apply.** Add the rule to the ruleset. This keeps every other rule and adds one:
+
+```bash
+ID=$(gh api repos/(repo)/rulesets --jq '.[] | select(.name=="Protect default branch") | .id')
+gh api repos/(repo)/rulesets/$ID \
+  | jq '{name, target, enforcement, bypass_actors, conditions,
+         rules: (.rules | map(select(.type != "required_signatures")) + [{type: "required_signatures"}])}' \
+  | gh api -X PUT repos/(repo)/rulesets/$ID --input -
+```
+
+**Verify.** Open a PR from a signed branch and confirm it merges. Open one with an unsigned commit and confirm it is blocked.
+
+**Not verified yet.** The signing setup in steps 1 to 3 (no signing key was registered on the test account). The block it causes without one, and the `required_signatures` rule JSON, were verified.
 
 **Skip when.** You commit from places where you cannot sign. Optional, not baseline.
 
@@ -391,11 +409,13 @@ gh api repos/(repo)/rulesets/$ID --jq '.rules[] | select(.type=="required_status
 
 Open a PR that breaks a workflow on purpose; it should not be mergeable.
 
+`strict_required_status_checks_policy: true` means a PR must be up to date with the default branch. When one PR merges, every other open PR shows `BEHIND` and cannot merge. Bring it up to date with `gh pr update-branch PR_NUMBER -R (repo)`; the checks run again on the new head. After pushing or updating a PR, wait about a minute: its workflows start some seconds after the push, and `gh pr checks` can say "no checks reported" until they do.
+
 ### 2.6 List what else can act on the repo
 
 **Why.** A GitHub App or integration with write access acts like another collaborator, and it arrives with CI and bots. Dependabot is one.
 
-**Verify.** Review Settings → GitHub Apps and Settings → Integrations for the repo. Not scripted yet: the API for listing a repo's installed apps needs confirming before it goes in this document.
+**Verify.** Review it in the web UI: your account's Settings → Applications (installed GitHub Apps, and which repos each can reach), and the repo's Settings → Integrations. There is no script for this. The REST endpoints that list installations (`repos/(repo)/installation`, `user/installations`) need a GitHub App token and reject a normal `gh` login, so the drift script in 6.1 cannot check it.
 
 ---
 
@@ -429,7 +449,7 @@ If the ruleset has no `required_status_checks` rule yet, use the recipe in 2.5 f
 **Apply.**
 
 ```bash
-gh api -X PATCH repos/(repo) \
+gh api -X PATCH repos/(repo) --silent \
   -f 'security_and_analysis[secret_scanning][status]=enabled' \
   -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled' \
   -f 'security_and_analysis[dependabot_security_updates][status]=enabled'
@@ -442,6 +462,8 @@ gh api -X PUT repos/(repo)/vulnerability-alerts
 gh api repos/(repo) --jq '.security_and_analysis'
 gh api repos/(repo)/vulnerability-alerts -i | head -1      # HTTP 204 means on
 ```
+
+The alerts setting can take a few seconds to show. A `404` right after the `PUT` is normal, so check again before assuming it failed.
 
 ### 3.2 gitleaks in CI
 
@@ -519,11 +541,13 @@ A missing tool is skipped silently so it never blocks a commit. Add the 2.4 lint
 **Verify.**
 
 ```bash
-# In a clone: stage a fake key, confirm the hook rejects it, then remove it
-echo 'aws_secret_access_key = "AKIAIOSFODNN7EXAMPLE"' > leak-test.txt
+# In a clone: stage a fake token, confirm the hook rejects it, then remove it. Never commit or push it.
+printf 'token = "ghp_%s"\n' R8kZ3mQ9xV2nL5wT7yB4cH6jD1fG0aS8eUpK > leak-test.txt
 git add leak-test.txt && lefthook run pre-commit      # should fail
 git restore --staged leak-test.txt && rm leak-test.txt
 ```
+
+The `printf` splits the `ghp_` prefix from the body so this doc doesn't trip the repo's own gitleaks scan; the file it writes still matches. Use a realistic-looking fake. gitleaks ignores obvious placeholders: the well-known AWS documentation key `AKIAIOSFODNN7EXAMPLE` is on its allowlist, so the hook passes and proves nothing.
 
 ### 3.4 Lockfile committed and enforced
 
@@ -573,7 +597,7 @@ grep -rnE 'npm install|pnpm install($| [^-])' .github/workflows Dockerfile* 2>/d
 
 Majors stay out of the group so each gets its own PR.
 
-To catch an ecosystem you forgot, add the `dependabot-coverage` workflow and script from this repository (`.github/workflows/dependabot-coverage.yml` and `.github/scripts/check-dependabot-coverage.sh`). It fails when a manifest has no Dependabot entry, or an entry has no cooldown.
+To catch an ecosystem you forgot, add the `dependabot-coverage` workflow and script from the [jsundquist/skills](https://github.com/jsundquist/skills) repository: [`.github/workflows/dependabot-coverage.yml`](https://github.com/jsundquist/skills/blob/main/.github/workflows/dependabot-coverage.yml) and [`.github/scripts/check-dependabot-coverage.sh`](https://github.com/jsundquist/skills/blob/main/.github/scripts/check-dependabot-coverage.sh). Copy both files into your repo. It fails when a manifest has no Dependabot entry, or an entry has no cooldown, and it was verified to fail on a `Dockerfile` with no `docker` entry.
 
 **Verify.**
 
@@ -648,7 +672,7 @@ gh pr checks PR_NUMBER -R (repo)          # note the exact check name
 
 **Make required.** The pull-request scan, using the exact name from `gh pr checks`. Called workflows are named `<caller job> / <called job>`, so confirm it and don't guess. The scheduled scan is not a PR check and is not made required; its failures show in the Security tab and the Actions list.
 
-**Skip when.** No lockfile yet. OSV-Scanner fails on a repo with nothing to scan, so add these workflows with the first lockfile, not before.
+**Skip when.** No lockfile yet. Both workflows pass on a repo with nothing to scan, so adding them early does no harm, but they check nothing and the required check proves nothing. Add them with the first lockfile.
 
 ### 3.7 Install and build scripts
 
@@ -663,7 +687,7 @@ gh pr checks PR_NUMBER -R (repo)          # note the exact check name
 | yarn 4 | `npmMinimalAgeGate: 7d` in `.yarnrc.yml` | `enableScripts: false` in `.yarnrc.yml` |
 | uv | `exclude-newer` under `[tool.uv]`, such as `"7 days"` | not applicable |
 
-Carried over from this repo's earlier stack notes and not re-verified. Other ecosystems get a row when someone uses them. The cooldown is not a complete defence: a compromised release that stays published longer than the cooldown still gets through.
+Each setting was checked against the tool itself (npm 11.16, pnpm 11.21, yarn 4.18, uv 0.13). yarn's `npmMinimalAgeGate` needs **Yarn 4.10 or newer**; Yarn 4.9 stops with "Unrecognized or legacy configuration settings". pnpm silently ignores a key it does not know, so confirm with `pnpm config get minimumReleaseAge`. Other ecosystems get a row when someone uses them. The cooldown is not a complete defence: a compromised release that stays published longer than the cooldown still gets through.
 
 **Skip when.** The ecosystem has no install scripts, or there are no dependencies.
 
@@ -713,7 +737,27 @@ These overlap with the baseline above. Add one only if you have a reason.
             extra_args: --only-verified
   ```
 
-- **`dependency-review-action`** on pull requests. The OSV pull-request scan already covers new vulnerabilities, so the unique value here is licence policy (deny lists) and GitHub's own advisory data. Add it if you care about licences.
+- **`dependency-review-action`** on pull requests. The OSV pull-request scan already covers new vulnerabilities, so the unique value here is licence policy (deny lists) and GitHub's own advisory data. Add it if you care about licences. `.github/workflows/dependency-review.yml`, pinned to the commit for `v5.0.1`:
+
+  ```yaml
+  name: dependency-review
+
+  on:
+    pull_request:
+
+  permissions: {}
+
+  jobs:
+    dependency-review:
+      runs-on: ubuntu-latest
+      permissions:
+        contents: read
+      steps:
+        - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          with:
+            persist-credentials: false
+        - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+  ```
 - **Per-stack audit tools** (`npm audit`, `pip-audit`). Only if OSV-Scanner misses something for an ecosystem you use.
 
 ---
@@ -737,7 +781,7 @@ gh api -X PATCH repos/(repo)/code-scanning/default-setup \
   -f state=configured -f query_suite=default
 ```
 
-GitHub detects the languages and starts a first run on the default branch. Supported languages include `actions`, so a repo whose only code is workflows is still scanned.
+GitHub detects the languages and starts a first run on the default branch. Supported languages include `actions`, so a repo whose only code is workflows is still scanned. The `languages` field stays empty until that first run has finished, so wait for it before concluding that nothing was detected.
 
 **Verify.**
 
@@ -760,9 +804,11 @@ gh api repos/(repo)/rulesets/$ID \
 
 `high_or_higher` blocks a PR that introduces a high or critical security alert. Lower the threshold to `medium_or_higher` for a stricter gate.
 
-**Skip when.** The repo has no language CodeQL supports (the first `gh api` call reports no languages).
+**When the repo gains a language.** Default setup fixes its language list when you configure it. Adding JavaScript or Python to a repo that started with only workflows does not add it: PRs kept being analyzed as `actions` only, even after the merge. Run the same `PATCH` again and it detects the languages afresh (the list then showed actions, javascript-typescript and python).
 
-**Not verified yet.** The request fields come from the REST docs and have not been run on a real repo. The `code_scanning` rule JSON is built from the docs' schema, with no example to copy.
+**Skip when.** The repo has no language CodeQL supports (after the first run finishes, `languages` stays empty).
+
+**Verified.** The `PATCH`, the `code_scanning` rule JSON and the gate. A PR whose only fault was an `eval` of a query parameter failed only the `CodeQL` check, with a critical `js/code-injection` alert, and could not merge. CodeQL's `actions` queries did not flag `run: echo "${{ github.event.issue.title }}"` under an `issues:` trigger; they flagged `pull_request_target` with an untrusted checkout. Do not rely on CodeQL alone for workflow injection: that is what zizmor in 2.4 is for.
 
 ### 4.2 Deep agent audit (optional, manual, occasional)
 
@@ -777,7 +823,16 @@ git clone https://github.com/cloudflare/security-audit-skill
 git -C security-audit-skill rev-parse HEAD     # note the commit you reviewed
 ```
 
-Follow its README to install the skill from that clone. By default it writes reports outside the repo, under `~/security-audit-skill/<repo-name>/`. It asks for an OS-enforced sandbox before running target code; without one it records leads as `needs_validation` and does not execute them.
+Read it, then install **from that clone**, not with the README's `npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit`: that fetches whatever the repository holds today, not the commit you reviewed. Copy the skill directory instead, for example `cp -R security-audit-skill/skills/security-audit ~/.claude/skills/`. By default it writes reports outside the repo, under `~/security-audit-skill/<repo-name>/run-<N>`. It asks for an OS-enforced sandbox before running target code; without one it records leads as `needs_validation` and does not execute them.
+
+Checked: the repo exists, is MIT licensed, and had a commit on 2026-09-14. The skill that was already installed matched the reviewed clone file for file (`diff -r` was empty).
+
+**Run once, on a small test repo (2026-11-18).** The audit ran to completion on about 25 files and wrote `REPORT.md`, `FINDINGS-DETAIL.md`, `NEEDS-VALIDATION.md`, `findings.json`, `coverage-ledger.json` and `architecture.md` under `~/security-audit-skill/<repo-name>/run-1/`, and both of its validators passed. Notes for the next run:
+
+- It defaults to the `standard` profile. For a small repo you can ask for `quick`, which is one hunter wave and one critic and is explicitly a partial pass. Our `quick` run used 3 hunters and 1 critic, took a few minutes, and found nothing, while the critic still listed four coverage gaps and two reassignments that `quick` defers. Treat a clean `quick` result as "nothing found in what was reviewed", and run `standard` before a release.
+- A `standard` run followed on the same repo, using the first run as prior-run input. It took 16 agents across two hunter waves, three critics and seven verifiers, found no confirmed vulnerability, and produced three `needs_validation` records and one rejected record. All three open records were about hosted settings or third-party tool behaviour the repo cannot show, and the last critic still reported gaps, so it stopped at a cap and says so. Expect that: the critic loop does not converge on a small repo, so decide a cap up front. The cost is real (about 65,000 to 100,000 tokens per agent), so run `standard` before a release, not on every change.
+- With no OS-enforced sandbox it reads source only and executes nothing, so anything needing execution or a hosted setting becomes `needs_validation`. It cannot see rulesets, environments or fork-PR approval; those come from the drift script in 6.1.
+- The skill writes into `~/security-audit-skill/`, outside the repo, so the report is not committed by accident.
 
 **Verify.** The run produces `REPORT.md` and `findings.json`. Triage the confirmed findings, and fix them in a PR.
 
@@ -826,12 +881,14 @@ Follow its README to install the skill from that clone. By default it writes rep
             persist-credentials: false
         - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
           with:
-            python-version: "3.x"
+            python-version: "3.13"
         - run: pip install semgrep==1.184.0
         - run: semgrep scan --config .semgrep/ --error
   ```
 
   Make `semgrep` required with the "Adding a required check" recipe in layer 3, once it has passed. The pinned version is the one current when this was written. Bump it deliberately, and keep it out of Dependabot's reach unless you add `pip` coverage.
+
+  Pin the Python minor version, as above. With `"3.x"` the runner picked Python 3.15, and `semgrep-core` crashed (exit -11) with "Nothing to scan". Scorecard (6.4) also marks `pip install semgrep==1.184.0` as "not pinned by hash" and takes a point off Pinned-Dependencies; accept that, or install from a hashed requirements file with `pip install --require-hashes`.
 
 ---
 
@@ -870,6 +927,8 @@ JSON
 
 A tag matching `v*.*.*` can no longer be deleted or moved. A moving tag such as `v1` is not matched, on purpose, for consumers of an Action or library you publish who want automatic patches.
 
+**A pushed tag is permanent.** If the release workflow (5.4) fails after you push a tag, you cannot delete the tag and push it again. Fix the workflow in a PR and release the next patch version. A failed run costs a version number, even before any immutable release exists.
+
 **Verify.**
 
 ```bash
@@ -879,7 +938,7 @@ git push origin :refs/tags/v0.0.1    # after a test tag exists: should be reject
 
 **Make required.** Not applicable: a tag rule has no status checks.
 
-**Not verified yet.** The tag ruleset JSON.
+**Verified.** The ruleset JSON is accepted, and both deleting and moving `v0.1.0` were rejected (`GH013: Repository rule violations`).
 
 ### 5.2 Publish with short-lived credentials
 
@@ -923,7 +982,7 @@ gh release verify v0.1.0 -R (repo)                         # after the first rel
 
 **Make required.** Not applicable.
 
-**Not verified yet.** GitHub's pages do not say whether this is generally available, and I have not run the API call. Confirm the setting appears in your repo before relying on it. `gh release verify` does not cover the auto-generated source zip and tarball.
+**Verified.** `PUT repos/(repo)/immutable-releases` works on a personal public repo and `GET` returns `{"enabled": true, "enforced_by_owner": false}`. Uploading to a published release failed with `HTTP 400`, and creating a release on the tag of a deleted immutable release failed with `tag_name was used by an immutable release`. `gh release verify` does not cover the auto-generated source zip and tarball.
 
 **Skip when.** 5.0 says to skip the layer.
 
@@ -1018,7 +1077,7 @@ gh release view v0.1.0 -R (repo)
 
 **Make required.** Not applicable: it runs on a tag.
 
-**Not verified yet.** This workflow has not been run end to end, including `gh release create --draft` followed by publish on a repo with immutable releases on.
+**Verified.** Run end to end on a tag with immutable releases on: build, attest and release all passed, the release was published as immutable with both files attached, and 5.5's commands all passed. With the SBOM steps from 5.6 added as described there, it passed on the first try.
 
 **Skip when.** The release has no built files.
 
@@ -1036,7 +1095,7 @@ gh attestation verify ./my-asset.tar.gz --repo (repo) \
   --predicate-type https://slsa.dev/provenance/v1    # built by the release workflow in 5.4
 ```
 
-The exit code is the answer: 0 means verified.
+The exit code is the answer: 0 means verified. `gh attestation verify` prints nothing on success when its output is not a terminal, and a file with no attestation fails with an `HTTP 404` message, not a "verification failed" one.
 
 **Skip when.** You do not consume your own releases. Anyone else who does can run the same commands.
 
@@ -1044,7 +1103,9 @@ The exit code is the answer: 0 means verified.
 
 **Why.** A list of what went into the release, signed to the files, so you can answer "does this release contain package X?" later.
 
-**Apply.** Add these steps to the `attest` job in 5.4. Syft reads the repo at the tagged commit. Pinned to the commit for `v0.24.3`:
+**Apply.** Change the `attest` job in 5.4 in two places. Syft reads the repo at the tagged commit. Pinned to the commit for `v0.24.3`.
+
+First, add these two steps at the **start** of the job, before `download-artifact`. `actions/checkout` cleans the workspace, so a checkout after the download would delete `dist/` and the attest step would fail with "Could not find subject at path dist/*":
 
 ```yaml
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1056,6 +1117,11 @@ The exit code is the answer: 0 means verified.
           format: cyclonedx-json
           output-file: sbom.cdx.json
           upload-artifact: false
+```
+
+Then add this step at the **end** of the job, after the existing `actions/attest` step:
+
+```yaml
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/*
@@ -1103,14 +1169,23 @@ check() { # description, expected, actual
   fi
 }
 
+check_visible() { # like check, but skip when GitHub does not return the field to this token
+  if [ "$3" = null ]; then
+    echo "skip   $1 (not visible to this token)"
+  else
+    check "$@"
+  fi
+}
+
 # Layer 0 and 1: repository settings
 r=$(gh api "repos/$repo")
 check "wiki off" false "$(jq .has_wiki <<<"$r")"
 check "projects off" false "$(jq .has_projects <<<"$r")"
-check "squash merge on" true "$(jq .allow_squash_merge <<<"$r")"
-check "merge commits off" false "$(jq .allow_merge_commit <<<"$r")"
-check "rebase merge off" false "$(jq .allow_rebase_merge <<<"$r")"
-check "delete branch on merge" true "$(jq .delete_branch_on_merge <<<"$r")"
+# GitHub returns these four only to a caller with push access, so a read-only token sees null
+check_visible "squash merge on" true "$(jq .allow_squash_merge <<<"$r")"
+check_visible "merge commits off" false "$(jq .allow_merge_commit <<<"$r")"
+check_visible "rebase merge off" false "$(jq .allow_rebase_merge <<<"$r")"
+check_visible "delete branch on merge" true "$(jq .delete_branch_on_merge <<<"$r")"
 
 # Layer 3: security features
 check "secret scanning" enabled "$(jq -r .security_and_analysis.secret_scanning.status <<<"$r")"
@@ -1174,6 +1249,8 @@ else
 fi
 ```
 
+The four merge-setting checks print `skip` when run with the read-only token from 6.2, because GitHub returns those fields only to callers with push access. The ruleset check on `allowed_merge_methods` still covers squash-only, and a run by hand as the repo owner checks all four.
+
 It covers the settings in layers 0 to 3 and the 2.6 gap for collaborators, keys, webhooks and secrets. It does not list installed GitHub Apps: no API for that has been confirmed, so review Settings → GitHub Apps by hand. It does not check layer 4 or 5 settings that only exist when you use them (the `code_scanning` rule, the tag ruleset, immutable releases). Add a check for each you adopted.
 
 **Verify.**
@@ -1186,7 +1263,7 @@ Turn one setting off on purpose (for example `gh api -X PATCH repos/(repo) -F ha
 
 **Make required.** Not applicable: it reads settings, not code.
 
-**Not verified yet.** The script has not been run against a real repo. Several field names come from the REST docs, notably `squash_merge_commit_*`, `fork-pr-contributor-approval` and `allowed_merge_methods`.
+**Verified.** Run as the repo owner it reported no drift, and with four settings changed on purpose (wiki, merge commits, private vulnerability reporting, fork PR approval) it reported all four. Every field name it reads exists, including `squash_merge_commit_*`, `fork-pr-contributor-approval` and `allowed_merge_methods`.
 
 ### 6.2 Drift check: scheduled
 
@@ -1310,7 +1387,7 @@ jobs:
           sarif_file: results.sarif
 ```
 
-**Read the score as a report, not a target.** Some checks cannot be perfect here by design. The review checks expect an approving human, and this path uses zero approvals. Some branch protection checks need a token with admin access that this workflow does not have. Look for checks that dropped, not for a score of 10.
+**Read the score as a report, not a target.** On a new test repo with all of layers 0 to 5 in place it scored about 6 out of 10. Code-Review scores 0 (zero approvals), Maintained scores 0 for a repo under 90 days old, and Fuzzing, CII-Best-Practices and Contributors score 0. Signed-Releases also scores 0, even with attestations and immutable releases: it looks for signature or provenance files attached to the release (such as `*.intoto.jsonl`), and does not read GitHub attestations. Some checks cannot be perfect here by design. The review checks expect an approving human, and this path uses zero approvals. Some branch protection checks need a token with admin access that this workflow does not have. Look for checks that dropped, not for a score of 10.
 
 **Verify.**
 
@@ -1322,7 +1399,7 @@ The score is on the run's summary, in the Security tab, and at `https://scorecar
 
 **Make required.** Not applicable: it runs on a schedule and on pushes, and its alerts are not PR checks.
 
-**Not verified yet.** The action SHAs were resolved when this was written. Which checks score low with this ruleset has not been looked at.
+**Verified.** The action SHAs resolve and the workflow runs. See the score notes above for what scores low and why.
 
 ### 6.5 Alerts: where they arrive, and how often you look
 
@@ -1334,9 +1411,11 @@ The score is on the run's summary, in the Security tab, and at `https://scorecar
 
 ```bash
 gh api repos/(repo)/dependabot/alerts --jq '[.[] | select(.state=="open")] | length'
-gh api 'repos/(repo)/code-scanning/alerts?state=open' --jq length
+gh api 'repos/(repo)/code-scanning/alerts?state=open&tool_name=CodeQL' --jq length
 gh api 'repos/(repo)/secret-scanning/alerts?state=open' --jq length
 ```
+
+The code-scanning count is filtered to CodeQL on purpose. The Scorecard workflow in 6.4 uploads its results to code scanning, so with it enabled there are always open Scorecard alerts, some marked high (such as Code-Review, which this path cannot satisfy with zero approvals). Read those in the Security tab as a report, not as a to-do count.
 
 ### 6.6 Runbook: when something goes wrong
 
@@ -1346,7 +1425,7 @@ Short on purpose. Each row is the first things to do, not the whole response. Ex
 |---|---|
 | **A secret leaked** (gitleaks, push protection or a secret-scanning alert) | 1. Revoke or rotate it at the provider. Do this first. 2. Replace it where it is used: `gh secret set NAME -R (repo)`. 3. Close the alert: `gh api -X PATCH repos/(repo)/secret-scanning/alerts/N -f state=resolved -f resolution=revoked`. 4. Rewriting history is secondary and does not un-leak it. |
 | **A dependency was compromised** | 1. Pin back to a good version or remove it, and regenerate the lockfile. 2. List runs that installed it: `gh run list -R (repo) --limit 50`. 3. Rotate every secret those runs could read. |
-| **A workflow or action was compromised** | 1. Pin the action to a known-good SHA in a PR. 2. Rotate every secret the affected workflows could read. 3. Clear the Actions caches: `gh cache delete --all -R (repo)`. |
+| **A workflow or action was compromised** | 1. Pin the action to a known-good SHA in a PR. 2. Rotate every secret the affected workflows could read. 3. Clear the Actions caches: `gh cache delete --all -R (repo)` (exits 1 with "No caches to delete" when there are none). |
 | **A release is bad** | Immutable releases cannot be edited or re-tagged. Mark it a pre-release in the notes, publish a fixed patch release, and say why in the notes. A container image is covered in [containers.md](containers.md). |
 | **Settings or workflows changed that you did not change** | 1. Run the drift script (6.1). 2. Check `gh api repos/(repo)/collaborators`, keys, hooks and recent commits and workflow runs. 3. Restore the setting from this document. |
 | **A vulnerability was reported privately** | 1. Read it: `gh api repos/(repo)/security-advisories`. 2. Fix it privately through the advisory's temporary private fork. 3. Publish the advisory and request a CVE from the advisory page. |
